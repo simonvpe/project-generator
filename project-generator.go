@@ -50,7 +50,7 @@ func cppGenerator(ctx *cli.Context) {
 		log.Fatalf("Failed to generate CMakeLists.txt %q", err)
 	}
 
-	if cmakeCtx.TestSuite != "" {
+	if cmakeCtx.TestSuite == "catch" {
 
 		if _, err := os.Stat("test"); os.IsNotExist(err) {
 			log.Output(0, "Creating test directory")
@@ -64,6 +64,20 @@ func cppGenerator(ctx *cli.Context) {
 			path.Join(env.Share, "test", "CMakeLists.tmpl"),
 			&cmakeCtx); err != nil {
 			log.Fatalf("Failed to generate CMakeLists.txt %q", err)
+		}
+
+		if _, err := git.Run("test",
+			"submodule",
+			"add",
+			"https://github.com/philsquared/Catch.git"); err != nil {
+			log.Fatalf("Failed to add submodule %q", err)
+		}
+
+		if _, err := git.Run("test",
+			"submodule",
+			"update",
+			"--init"); err != nil {
+			log.Fatalf("Failed to init and update submodules %q", err)
 		}
 	}
 }
