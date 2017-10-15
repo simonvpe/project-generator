@@ -4,20 +4,17 @@ import (
 	"bytes"
 	"log"
 	"os"
+	"path"
 	"strings"
-	"text/template"
 	"github.com/urfave/cli"
 	"github.com/Pallinder/go-randomdata"
 	"github.com/simonvpe/git"
+	"github.com/simonvpe/cmake"
+	"github.com/kelseyhightower/envconfig"
 )
 
-const CPP int = 0
-
-type Project struct {
-	Name        string
-	Language    int
-	Tests       bool
-	Extension   string
+type Environment struct {
+	Share string `default:"/usr/share/myapp"`
 }
 
 func generateName() string {
@@ -28,83 +25,50 @@ func generateName() string {
 	return strings.ToLower(buffer.String())
 }
 
-func initializeRepository(proj Project) {
-	log.Output(0, "Initializing git repository")
-	_, err := git.Run(".", "init")
-	if err != nil {
-		log.Fatal(err)
-	}
-}
-
-func createRootCmakeLists(proj Project) {
-	log.Output(0, "Creating CMakeLists.txt")
-	t := template.Must(template.ParseFiles("CMakeLists.tmpl"))
-	f, err := os.OpenFile("CMakeLists.txt", os.O_APPEND|os.O_WRONLY, 0644)
-	if err != nil {
-		log.Fatal(err)
-	}
-	
-	err = t.Execute(f, proj)
-	if err != nil {
-		log.Fatal(err)
-	}
-}
-
-func createTestsDirectory(proj Project) {
-	_, err := os.Stat("tests")
-	if proj.Tests && err != nil {
-		log.Output(0, "Creating tests directory")
-		err := os.Mkdir("tests", os.ModePerm)
-		if err != nil {
-			log.Fatal(err)
-		}
-	}
-}
-
-func createTestsCmakeLists(proj Project) {
-	if proj.Tests {
-		log.Output(0, "Creating tests/CMakeLists.txt")
-		t := template.Must(template.ParseFiles("CMakeLists_tests.tmpl"))
-		f, err := os.OpenFile("tests/CMakeLists.txt", os.O_APPEND|os.O_WRONLY, 0644)
-		if err != nil {
-			log.Fatal(err)
-		}
-		
-		err = t.Execute(f, proj)		
-		if err != nil {			
-			log.Fatal(err)
-		}
-
-		
-		if _, err = git.Run(".", "add", "tests/CMakeLists.txt"); err != nil {
-			log.Fatal(err)
-		}
-	}
-}
-
-func addTestFramework(proj Project) {
-
-}
-
 func cppGenerator(ctx *cli.Context) {
+	var env Environment
+	envconfig.Process("myapp", &env)
 	
 	log.Output(0, "Generating C++ project")
 
-	proj := Project {
-		Language: CPP,
-		Name: ctx.String("name"),
-		Tests: ctx.Bool("tests"),
-		Extension: "cpp",
+	cmakeCtx := cmake.CMakeContext {
+		ProjectName: ctx.String("name"),
+		MinimumVersion: "3.8",
+		TestSuite: ctx.String("tests"),
+		Language: "cpp",
+	}
+	
+	log.Output(0, "Initializing git repository")
+	if _, err := git.Run(".", "init"); err != nil {
+		log.Fatalf("Failed to initialize repository %q\n", err)
 	}
 
-	initializeRepository(proj)
-	createRootCmakeLists(proj)
-	createTestsDirectory(proj)
-	createTestsCmakeLists(proj)
-	addTestFramework(proj)
+	log.Output(0, "Generating CMakeLists.txt")
+	if err := cmake.Generate("CMakeLists.txt",
+		path.Join(env.Share, "CMakeLists.tmpl"),
+		&cmakeCtx); err != nil {
+		log.Fatalf("Failed to generate CMakeLists.txt %q", err)
+	}
+
+	if cmakeCtx.TestSuite != "" {
+
+		if _, err := os.Stat("test"); os.IsNotExist(err) {
+			log.Output(0, "Creating test directory")
+			if err := os.Mkdir("test", os.ModePerm); err != nil {
+				log.Fatalf("Failed to create test directory %q", err)
+			}
+		}
+		
+		log.Output(0, "Generating test/CMakeLists.txt")
+		if err := cmake.Generate(path.Join("test", "CMakeLists.txt"),
+			path.Join(env.Share, "test", "CMakeLists.tmpl"),
+			&cmakeCtx); err != nil {
+			log.Fatalf("Failed to generate CMakeLists.txt %q", err)
+		}
+	}
 }
 
-func main() {
+func main() {	
 	app := cli.NewApp()
 	app.Name = "project-generator"
 	app.Usage = "generate a software project"
@@ -116,9 +80,9 @@ func main() {
 			Usage: "generate a C++ project",
 			Action: cppGenerator,
 			Flags: []cli.Flag {
-				cli.BoolFlag{
+				cli.StringFlag{
 					Name: "tests",
-					Usage: "include tests",
+					Value: "catch",
 				},
 				cli.StringFlag{
 					Name: "name",
